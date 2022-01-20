@@ -419,7 +419,6 @@ public class WorkflowInstanceManager {
      * @param node 节点信息
      */
     private void runInstance(PEWorkflowDAG.Node node) {
-
         JobInfoDO jobInfo = jobInfoRepository.findById(node.getJobId()).orElseGet(JobInfoDO::new);
         // 洗去时间表达式类型
         jobInfo.setTimeExpressionType(TimeExpressionType.WORKFLOW.getV());

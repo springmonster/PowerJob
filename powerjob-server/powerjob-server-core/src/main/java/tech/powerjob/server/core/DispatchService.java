@@ -1,9 +1,16 @@
 package tech.powerjob.server.core;
 
+import com.google.common.collect.Lists;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanUtils;
+import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 import tech.powerjob.common.RemoteConstant;
 import tech.powerjob.common.SystemInstanceResult;
 import tech.powerjob.common.enums.*;
 import tech.powerjob.common.request.ServerScheduleJobReq;
+import tech.powerjob.server.common.module.WorkerInfo;
 import tech.powerjob.server.core.instance.InstanceManager;
 import tech.powerjob.server.core.instance.InstanceMetadataService;
 import tech.powerjob.server.core.lock.UseSegmentLock;
@@ -12,13 +19,6 @@ import tech.powerjob.server.persistence.remote.model.JobInfoDO;
 import tech.powerjob.server.persistence.remote.repository.InstanceInfoRepository;
 import tech.powerjob.server.remote.transport.TransportService;
 import tech.powerjob.server.remote.worker.WorkerClusterQueryService;
-import tech.powerjob.server.common.module.WorkerInfo;
-import com.google.common.collect.Lists;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.BeanUtils;
-import org.springframework.stereotype.Service;
-import org.springframework.util.CollectionUtils;
-import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
 import java.util.Date;
@@ -39,19 +39,19 @@ import static tech.powerjob.common.enums.InstanceStatus.*;
 @Slf4j
 @Service
 public class DispatchService {
-
+    
     @Resource
     private TransportService transportService;
     @Resource
     private WorkerClusterQueryService workerClusterQueryService;
-
+    
     @Resource
     private InstanceManager instanceManager;
     @Resource
     private InstanceMetadataService instanceMetadataService;
     @Resource
     private InstanceInfoRepository instanceInfoRepository;
-
+    
     /**
      * 重新派发任务实例（不考虑实例当前的状态）
      *
@@ -67,9 +67,9 @@ public class DispatchService {
         instanceInfoRepository.saveAndFlush(instance);
         dispatch(jobInfo, instanceId);
     }
-
+    
     /**
-     * 将任务从Server派发到Worker（TaskTracker）
+     * kuanghc1: 将任务从Server派发到Worker（TaskTracker）
      * 只会派发当前状态为等待派发的任务实例
      * **************************************************
      * 2021-02-03 modify by Echo009
@@ -103,11 +103,11 @@ public class DispatchService {
             instanceManager.processFinishedInstance(instanceId, instanceInfo.getWfInstanceId(), FAILED, "can't find job by id " + jobId);
             return;
         }
-
+        
         Date now = new Date();
         String dbInstanceParams = instanceInfo.getInstanceParams() == null ? "" : instanceInfo.getInstanceParams();
         log.info("[Dispatcher-{}|{}] start to dispatch job: {};instancePrams: {}.", jobId, instanceId, jobInfo, dbInstanceParams);
-
+        
         // 查询当前运行的实例数
         long current = System.currentTimeMillis();
         Integer maxInstanceNum = jobInfo.getMaxInstanceNum();
@@ -115,7 +115,7 @@ public class DispatchService {
         if (TimeExpressionType.frequentTypes.contains(jobInfo.getTimeExpressionType())) {
             maxInstanceNum = 1;
         }
-
+        
         // 0 代表不限制在线任务，还能省去一次 DB 查询
         if (maxInstanceNum > 0) {
             // 不统计 WAITING_DISPATCH 的状态：使用 OpenAPI 触发的延迟任务不应该统计进去（比如 delay 是 1 天）
@@ -126,42 +126,42 @@ public class DispatchService {
                 String result = String.format(SystemInstanceResult.TOO_MANY_INSTANCES, runningInstanceCount, maxInstanceNum);
                 log.warn("[Dispatcher-{}|{}] cancel dispatch job due to too much instance is running ({} > {}).", jobId, instanceId, runningInstanceCount, maxInstanceNum);
                 instanceInfoRepository.update4TriggerFailed(instanceId, FAILED.getV(), current, current, RemoteConstant.EMPTY_ADDRESS, result, now);
-
+                
                 instanceManager.processFinishedInstance(instanceId, instanceInfo.getWfInstanceId(), FAILED, result);
                 return;
             }
         }
-
+        
         // 获取当前最合适的 worker 列表
         List<WorkerInfo> suitableWorkers = workerClusterQueryService.getSuitableWorkers(jobInfo);
-
+        
         if (CollectionUtils.isEmpty(suitableWorkers)) {
             log.warn("[Dispatcher-{}|{}] cancel dispatch job due to no worker available", jobId, instanceId);
             instanceInfoRepository.update4TriggerFailed(instanceId, FAILED.getV(), current, current, RemoteConstant.EMPTY_ADDRESS, SystemInstanceResult.NO_WORKER_AVAILABLE, now);
-
+            
             instanceManager.processFinishedInstance(instanceId, instanceInfo.getWfInstanceId(), FAILED, SystemInstanceResult.NO_WORKER_AVAILABLE);
             return;
         }
         List<String> workerIpList = suitableWorkers.stream().map(WorkerInfo::getAddress).collect(Collectors.toList());
-
+        
         // 构造任务调度请求
         ServerScheduleJobReq req = constructServerScheduleJobReq(jobInfo, instanceInfo, workerIpList);
-
-
+        
+        
         // 发送请求（不可靠，需要一个后台线程定期轮询状态）
         WorkerInfo taskTracker = selectTaskTracker(jobInfo, suitableWorkers);
         String taskTrackerAddress = taskTracker.getAddress();
-
+        
         transportService.tell(Protocol.of(taskTracker.getProtocol()), taskTrackerAddress, req);
         log.info("[Dispatcher-{}|{}] send schedule request to TaskTracker[protocol:{},address:{}] successfully: {}.", jobId, instanceId, taskTracker.getProtocol(), taskTrackerAddress, req);
-
+        
         // 修改状态
         instanceInfoRepository.update4TriggerSucceed(instanceId, WAITING_WORKER_RECEIVE.getV(), current, taskTrackerAddress, now);
-
+        
         // 装载缓存
         instanceMetadataService.loadJobInfo(instanceId, jobInfo);
     }
-
+    
     /**
      * 构造任务调度请求
      */
@@ -183,13 +183,13 @@ public class DispatchService {
         }
         req.setInstanceId(instanceInfo.getInstanceId());
         req.setAllWorkerAddress(finalWorkersIpList);
-
+        
         // 设置工作流ID
         req.setWfInstanceId(instanceInfo.getWfInstanceId());
-
+        
         req.setExecuteType(ExecuteType.of(jobInfo.getExecuteType()).name());
         req.setProcessorType(ProcessorType.of(jobInfo.getProcessorType()).name());
-
+        
         req.setTimeExpressionType(TimeExpressionType.of(jobInfo.getTimeExpressionType()).name());
         if (jobInfo.getInstanceTimeLimit() != null) {
             req.setInstanceTimeoutMS(jobInfo.getInstanceTimeLimit());
@@ -197,7 +197,7 @@ public class DispatchService {
         req.setThreadConcurrency(jobInfo.getConcurrency());
         return req;
     }
-
+    
     private WorkerInfo selectTaskTracker(JobInfoDO jobInfo, List<WorkerInfo> workerInfos) {
         DispatchStrategy dispatchStrategy = DispatchStrategy.of(jobInfo.getDispatchStrategy());
         switch (dispatchStrategy) {

@@ -86,7 +86,13 @@ public class WorkflowController {
         }
         return ResultDTO.success(convertPage(wfPage));
     }
-
+    
+    /**
+     * kuanghc1: 这里启动workflow
+     * @param workflowId
+     * @param appId
+     * @return
+     */
     @GetMapping("/run")
     public ResultDTO<Long> runWorkflow(Long workflowId, Long appId) {
         return ResultDTO.success(workflowService.runWorkflow(workflowId, appId, null, 0L));

@@ -8,9 +8,9 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
-import tech.powerjob.common.exception.PowerJobException;
 import tech.powerjob.common.enums.TimeExpressionType;
 import tech.powerjob.common.enums.WorkflowNodeType;
+import tech.powerjob.common.exception.PowerJobException;
 import tech.powerjob.common.model.PEWorkflowDAG;
 import tech.powerjob.common.request.http.SaveWorkflowNodeRequest;
 import tech.powerjob.common.request.http.SaveWorkflowRequest;
@@ -43,7 +43,7 @@ import java.util.*;
 @Slf4j
 @Service
 public class WorkflowService {
-
+    
     @Resource
     private WorkflowInstanceManager workflowInstanceManager;
     @Resource
@@ -52,10 +52,10 @@ public class WorkflowService {
     private WorkflowNodeInfoRepository workflowNodeInfoRepository;
     @Resource
     private JobInfoRepository jobInfoRepository;
-
+    
     /**
-     * 保存/修改工作流信息
-     *
+     * kuanghc1:保存/修改工作流信息
+     * <p>
      * 注意这里不会保存 DAG 信息
      *
      * @param req 请求
@@ -63,9 +63,9 @@ public class WorkflowService {
      */
     @Transactional(rollbackOn = Exception.class)
     public Long saveWorkflow(SaveWorkflowRequest req) throws ParseException {
-
+        
         req.valid();
-
+        
         Long wfId = req.getId();
         WorkflowInfoDO wf;
         if (wfId == null) {
@@ -75,16 +75,16 @@ public class WorkflowService {
             Long finalWfId = wfId;
             wf = workflowInfoRepository.findById(wfId).orElseThrow(() -> new IllegalArgumentException("can't find workflow by id:" + finalWfId));
         }
-
+        
         BeanUtils.copyProperties(req, wf);
         wf.setGmtModified(new Date());
         wf.setStatus(req.isEnable() ? SwitchableStatus.ENABLE.getV() : SwitchableStatus.DISABLE.getV());
         wf.setTimeExpressionType(req.getTimeExpressionType().getV());
-
+        
         if (req.getNotifyUserIds() != null) {
             wf.setNotifyUserIds(SJ.COMMA_JOINER.join(req.getNotifyUserIds()));
         }
-
+        
         // 计算 NextTriggerTime
         if (req.getTimeExpressionType() == TimeExpressionType.CRON) {
             CronExpression cronExpression = new CronExpression(req.getTimeExpression());
@@ -102,7 +102,7 @@ public class WorkflowService {
         workflowInfoRepository.saveAndFlush(wf);
         return wfId;
     }
-
+    
     /**
      * 保存 DAG 信息
      * 这里会物理删除游离的节点信息
@@ -138,8 +138,8 @@ public class WorkflowService {
         log.warn("[WorkflowService-{}] delete {} dissociative nodes of workflow", wfId, deleteCount);
         return JSON.toJSONString(dag);
     }
-
-
+    
+    
     /**
      * 深度复制工作流
      *
@@ -149,7 +149,7 @@ public class WorkflowService {
      */
     @Transactional(rollbackOn = Exception.class)
     public long copyWorkflow(Long wfId, Long appId) {
-
+        
         WorkflowInfoDO originWorkflow = permissionCheck(wfId, appId);
         if (originWorkflow.getStatus() == SwitchableStatus.DELETED.getV()) {
             throw new IllegalStateException("can't copy the workflow which has been deleted!");
@@ -163,32 +163,32 @@ public class WorkflowService {
         copyWorkflow.setWfName(copyWorkflow.getWfName() + "_COPY");
         // 先 save 获取 id
         copyWorkflow = workflowInfoRepository.saveAndFlush(copyWorkflow);
-
+        
         if (StringUtils.isEmpty(copyWorkflow.getPeDAG())) {
             return copyWorkflow.getId();
         }
-
+        
         PEWorkflowDAG dag = JSON.parseObject(copyWorkflow.getPeDAG(), PEWorkflowDAG.class);
-
+        
         // 拷贝节点信息，并且更新 DAG 中的节点信息
         if (!CollectionUtils.isEmpty(dag.getNodes())) {
             // originNodeId => copyNodeId
             HashMap<Long, Long> nodeIdMap = new HashMap<>(dag.getNodes().size(), 1);
             // 校正 节点信息
             for (PEWorkflowDAG.Node node : dag.getNodes()) {
-
+                
                 WorkflowNodeInfoDO originNode = workflowNodeInfoRepository.findById(node.getNodeId()).orElseThrow(() -> new IllegalArgumentException("can't find workflow Node by id: " + node.getNodeId()));
-
+                
                 WorkflowNodeInfoDO copyNode = new WorkflowNodeInfoDO();
                 BeanUtils.copyProperties(originNode, copyNode);
                 copyNode.setId(null);
                 copyNode.setWorkflowId(copyWorkflow.getId());
                 copyNode.setGmtCreate(new Date());
                 copyNode.setGmtModified(new Date());
-
+                
                 copyNode = workflowNodeInfoRepository.saveAndFlush(copyNode);
                 nodeIdMap.put(originNode.getId(), copyNode.getId());
-
+                
                 node.setNodeId(copyNode.getId());
             }
             // 校正 边信息
@@ -201,8 +201,8 @@ public class WorkflowService {
         workflowInfoRepository.saveAndFlush(copyWorkflow);
         return copyWorkflow.getId();
     }
-
-
+    
+    
     /**
      * 获取工作流元信息，这里获取到的 DAG 包含节点的完整信息（是否启用、是否允许失败跳过）
      *
@@ -215,7 +215,7 @@ public class WorkflowService {
         fillWorkflow(wfInfo);
         return wfInfo;
     }
-
+    
     /**
      * 删除工作流（软删除）
      *
@@ -228,7 +228,7 @@ public class WorkflowService {
         wfInfo.setGmtModified(new Date());
         workflowInfoRepository.saveAndFlush(wfInfo);
     }
-
+    
     /**
      * 禁用工作流
      *
@@ -241,7 +241,7 @@ public class WorkflowService {
         wfInfo.setGmtModified(new Date());
         workflowInfoRepository.saveAndFlush(wfInfo);
     }
-
+    
     /**
      * 启用工作流
      *
@@ -254,9 +254,9 @@ public class WorkflowService {
         wfInfo.setGmtModified(new Date());
         workflowInfoRepository.saveAndFlush(wfInfo);
     }
-
+    
     /**
-     * 立即运行工作流
+     * kuanghc1：立即运行工作流
      *
      * @param wfId       工作流ID
      * @param appId      所属应用ID
@@ -266,10 +266,10 @@ public class WorkflowService {
      */
     @DesignateServer
     public Long runWorkflow(Long wfId, Long appId, String initParams, Long delay) {
-
+        
         delay = delay == null ? 0 : delay;
         WorkflowInfoDO wfInfo = permissionCheck(wfId, appId);
-
+        
         log.info("[WorkflowService-{}] try to run workflow, initParams={},delay={} ms.", wfInfo.getId(), initParams, delay);
         Long wfInstanceId = workflowInstanceManager.create(wfInfo, initParams, System.currentTimeMillis() + delay);
         if (delay <= 0) {
@@ -279,8 +279,8 @@ public class WorkflowService {
         }
         return wfInstanceId;
     }
-
-
+    
+    
     /**
      * 保存工作流节点（新增 或者 保存）
      *
@@ -307,7 +307,7 @@ public class WorkflowService {
                 workflowNodeInfo = new WorkflowNodeInfoDO();
                 workflowNodeInfo.setGmtCreate(new Date());
             }
-
+            
             // valid job info
             if (req.getType() == WorkflowNodeType.JOB) {
                 JobInfoDO jobInfoDO = jobInfoRepository.findById(req.getJobId()).orElseThrow(() -> new IllegalArgumentException("can't find job by id: " + req.getJobId()));
@@ -318,7 +318,7 @@ public class WorkflowService {
                     workflowNodeInfo.setNodeName(jobInfoDO.getJobName());
                 }
             }
-
+            
             BeanUtils.copyProperties(req, workflowNodeInfo);
             workflowNodeInfo.setType(req.getType().getCode());
             workflowNodeInfo.setGmtModified(new Date());
@@ -327,10 +327,10 @@ public class WorkflowService {
         }
         return res;
     }
-
-
+    
+    
     private void fillWorkflow(WorkflowInfoDO wfInfo) {
-
+        
         PEWorkflowDAG dagInfo = null;
         try {
             dagInfo = JSON.parseObject(wfInfo.getPeDAG(), PEWorkflowDAG.class);
@@ -340,9 +340,9 @@ public class WorkflowService {
         if (dagInfo == null) {
             return;
         }
-
+        
         Map<Long, WorkflowNodeInfoDO> nodeIdNodInfoMap = Maps.newHashMap();
-
+        
         workflowNodeInfoRepository.findByWorkflowId(wfInfo.getId()).forEach(
                 e -> nodeIdNodInfoMap.put(e.getId(), e)
         );
@@ -362,8 +362,8 @@ public class WorkflowService {
         }
         wfInfo.setPeDAG(JSON.toJSONString(dagInfo));
     }
-
-
+    
+    
     private WorkflowInfoDO permissionCheck(Long wfId, Long appId) {
         WorkflowInfoDO wfInfo = workflowInfoRepository.findById(wfId).orElseThrow(() -> new IllegalArgumentException("can't find workflow by id: " + wfId));
         if (!wfInfo.getAppId().equals(appId)) {
